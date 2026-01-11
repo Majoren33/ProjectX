@@ -542,6 +542,7 @@ local function FindItem(searchData, returnAmount)
             local itemInfo = {
                 UID = uid,
                 ID = itemTable.GetId and itemTable:GetId() or nil,
+                Display = itemTable.GetId and itemTable:GetId() or "Unknown",
                 Class = itemTable.GetClass and itemTable:GetClass() or itemTable.Class and itemTable.Class.Name or searchData.Class or "Pet",
                 Rainbow = itemTable.IsRainbow and itemTable:IsRainbow() or false,
                 Golden = itemTable.IsGolden and itemTable:IsGolden() or false,
@@ -557,6 +558,19 @@ local function FindItem(searchData, returnAmount)
                 Rarity = itemTable.GetRarity and itemTable:GetRarity()._id,
             }
             
+            -- Build display name with variants
+            if itemInfo.Shiny then
+                itemInfo.Display = "Shiny " .. itemInfo.Display
+            end
+            if itemInfo.Rainbow then
+                itemInfo.Display = "Rainbow " .. itemInfo.Display
+            end
+            if itemInfo.Golden then
+                itemInfo.Display = "Golden " .. itemInfo.Display
+            end
+            
+            DebugPrint("Checking item:", itemInfo.Display, "Locked:", itemInfo.IsLocked, "Tradeable:", not itemInfo.NotTradeable)
+            
             -- Skip locked/untradeable items
             if itemInfo.IsLocked or itemInfo.NotTradeable or BlacklistedUIDs[uid] or not uid then
                 continue
@@ -567,6 +581,7 @@ local function FindItem(searchData, returnAmount)
                 if returnAmount then
                     count = count + itemInfo.Amount
                 else
+                    DebugPrint("Found matching item:", itemInfo.Display, "UID:", uid)
                     table.insert(LastUIDs, uid)
                     return uid, itemInfo
                 end
@@ -988,7 +1003,15 @@ local function GenerateFindInfo(name, config)
         Shiny = false
     }
     
-    -- Parse variants
+    -- Handle special search terms (don't parse these)
+    if name:find("All Huges") or name:find("All Titanics") or name:find("All Exclusives") or 
+       name:find("All Rarity") or name:find("All Class") or name:find("All Items") then
+        findInfo.Display = name
+        return findInfo
+    end
+    
+    -- Parse variants from the name
+    local workingName = name
     if not name:find("Board") and not name:find("Gem") then
         local rainbowPos = name:find("Rainbow")
         local hugePos = name:find("Huge")
@@ -996,22 +1019,27 @@ local function GenerateFindInfo(name, config)
         findInfo.Golden = name:find("Golden") and true
         findInfo.Shiny = name:find("Shiny") and true
         
-        name = name:gsub((findInfo.Rainbow and "Rainbow " or findInfo.Golden and "Golden ") or "", "")
-        name = name:gsub(findInfo.Shiny and "Shiny " or "", "")
+        workingName = workingName:gsub("Rainbow ", "")
+        workingName = workingName:gsub("Golden ", "")
+        workingName = workingName:gsub("Shiny ", "")
     end
     
-    -- Parse tier
-    local main, tier = name:match("(.+)%s+(%d+)%s*$")
+    -- Parse tier (both numeric and roman numerals)
+    local main, tier = workingName:match("(.+)%s+(%d+)%s*$")
     if tier then
         findInfo.Tier = tonumber(tier)
-        name = main .. " " .. ConvertToRoman(findInfo.Tier)
-    elseif name:find("(%u+)%s*$") then
-        findInfo.Tier = ConvertFromRoman(name:match("(%u+)%s*$"))
+        workingName = main .. " " .. ConvertToRoman(findInfo.Tier)
+    elseif workingName:find("(%u+)%s*$") then
+        local romanNumeral = workingName:match("(%u+)%s*$")
+        local tierNum = ConvertFromRoman(romanNumeral)
+        if tierNum and tierNum > 0 then
+            findInfo.Tier = tierNum
+        end
     end
     
-    findInfo.Display = name
+    findInfo.Display = workingName
     
-    -- Find in item directory
+    -- Try to find the item in the game directory
     local itemTypes = require(NLibrary.Items.Types).Types
     for className in pairs(itemTypes) do
         local success, directory = pcall(function()
@@ -1031,14 +1059,29 @@ local function GenerateFindInfo(name, config)
                     displayName = displayName(findInfo.Tier or 1)
                 end
                 
-                if displayName == name then
+                -- Try exact match first
+                if displayName == workingName then
                     findInfo.Class = className
                     findInfo.ID = itemId
-                    break
+                    DebugPrint("Found exact match:", itemId, "in class:", className)
+                    return findInfo
+                end
+                
+                -- Try case-insensitive match
+                if displayName and displayName:lower() == workingName:lower() then
+                    findInfo.Class = className
+                    findInfo.ID = itemId
+                    findInfo.Display = displayName  -- Use correct casing
+                    DebugPrint("Found case-insensitive match:", itemId, "in class:", className)
+                    return findInfo
                 end
             end
         end
     end
+    
+    -- If not found in directory, log for debugging
+    DebugPrint("Item not found in directory:", workingName)
+    warn("[Item Search] Could not find '" .. name .. "' in game directory. The item might have a different name.")
     
     return findInfo
 end
@@ -1150,13 +1193,40 @@ local function RunSellerMode()
         end
         
         -- Calculate price
-        local itemObj = CreateItemObject(itemData)
-        local rap = GetRAP(itemObj)
+        local itemObj = nil
+        local rap = nil
         
-        if not rap and (type(item.Config.Price) == "string" and item.Config.Price:find("%%")) then
-            warn("[Seller] Cannot list " .. item.Name .. " - no RAP available")
-            BlacklistedUIDs[uid] = true
-            continue
+        -- For "All Huges" and similar, we need to create the item object from actual item data
+        pcall(function()
+            itemObj = CreateItemObject(itemData)
+            rap = GetRAP(itemObj)
+        end)
+        
+        -- If RAP is needed for pricing but not available, try alternative methods
+        if not rap and (type(item.Config.Price) == "string" and (item.Config.Price:find("%%") or item.Config.Price:find("%+"))) then
+            -- Try to get RAP from the inventory item directly
+            local uid, invItem = FindItem(findInfo, false)
+            if invItem then
+                pcall(function()
+                    local inventoryObj = GetInventoryByClass(invItem.Class)
+                    if inventoryObj and inventoryObj._byUID and inventoryObj._byUID[invItem.UID] then
+                        local actualItem = inventoryObj._byUID[invItem.UID]
+                        rap = GetRAP(actualItem)
+                    end
+                end)
+            end
+            
+            -- Still no RAP? Try cosmic values
+            if not rap and item.Config.UseCosmicValues then
+                rap = GetCosmicValue(itemData.Display)
+            end
+            
+            -- Last resort: Use a fixed price instead
+            if not rap then
+                warn("[Seller] Cannot list " .. item.Name .. " - no RAP available. Consider using a fixed price instead of percentage.")
+                BlacklistedUIDs[uid] = true
+                continue
+            end
         end
         
         -- Check manipulation
