@@ -10,20 +10,7 @@ end
 
 -- Configuration Check
 if not getgenv().Settings then
-    return error([[
-========================================
-  CONFIGURATION NOT FOUND!
-========================================
-Please load the configuration BEFORE the main script.
-
-Example usage:
-  getgenv().Settings = { ... }
-  loadstring(game:HttpGet("YOUR_GITHUB_URL"))()
-
-Or use the config template from:
-  https://github.com/Jxntt/open-source
-========================================
-]])
+    return error("Configuration not found! Please load getgenv().Settings before running the script.")
 end
 
 local Settings = getgenv().Settings
@@ -129,17 +116,7 @@ if not IsInPlaza then
     end
     
     if not IsInPlaza then
-        return error([[
-========================================
-  NOT IN TRADING PLAZA!
-========================================
-This bot only works in the Trading Plaza.
-
-The script attempted to travel but failed.
-Please manually join the Trading Plaza and
-run the script again.
-========================================
-]])
+        return error("[Bot] ERROR: Not in Trading Plaza! Please manually join the Trading Plaza and try again.")
     end
 end
 
@@ -287,21 +264,7 @@ repeat
 until SetupBoothSystem() or boothSetupAttempts >= maxBoothAttempts
 
 if not Booths or not ClaimedBooths or not BoothsInteractive then
-    return error([[
-========================================
-  BOOTH SYSTEM INITIALIZATION FAILED!
-========================================
-Could not connect to the booth system.
-
-Possible causes:
-- Not in Trading Plaza
-- Game not fully loaded
-- Executor incompatibility
-
-Please ensure you are in the Trading Plaza
-and try again.
-========================================
-]])
+    return error("[Bot] ERROR: Booth system initialization failed! Make sure you are in the Trading Plaza and all booths are loaded. Try rejoining and waiting 30 seconds before running the script.")
 end
 
 -- ============================================
