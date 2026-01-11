@@ -28,6 +28,15 @@ end
 
 local Settings = getgenv().Settings
 
+-- Debug mode (set to true for detailed logs)
+local DEBUG_MODE = getgenv().DEBUG_MODE or false
+
+local function DebugPrint(...)
+    if DEBUG_MODE then
+        print("[DEBUG]", ...)
+    end
+end
+
 -- Validate configuration
 if not Settings.Sniper and not Settings.Seller then
     return error("[Bot] Invalid config: Must have Sniper or Seller table")
@@ -81,12 +90,57 @@ local GAME_IDS = {
 }
 
 local CurrentGame = nil
+local IsInPlaza = false
+
 if table.find({GAME_IDS.PS99.Normal, GAME_IDS.PS99.Pro}, game.PlaceId) then
     CurrentGame = "PS99"
+    IsInPlaza = true
 elseif table.find({GAME_IDS.PETSGO.Normal, GAME_IDS.PETSGO.Pro}, game.PlaceId) then
     CurrentGame = "PETSGO"
-else
-    return warn("[Bot] Unsupported game! Must be in Pet Simulator 99 or Pets Go Trading Plaza")
+    IsInPlaza = true
+end
+
+if not IsInPlaza then
+    warn("[Bot] Not in Trading Plaza! Attempting to travel...")
+    
+    -- Try to travel to plaza
+    local travelAttempts = 0
+    while travelAttempts < 5 do
+        travelAttempts = travelAttempts + 1
+        
+        local success = pcall(function()
+            Library.Network.Invoke("Travel to Trading Plaza")
+        end)
+        
+        if success then
+            print("[Bot] Travel initiated, waiting for load...")
+            task.wait(10)
+            
+            -- Check if we're in plaza now
+            if table.find({GAME_IDS.PS99.Normal, GAME_IDS.PS99.Pro, GAME_IDS.PETSGO.Normal, GAME_IDS.PETSGO.Pro}, game.PlaceId) then
+                if CurrentGame == "PS99" or CurrentGame == "PETSGO" then
+                    IsInPlaza = true
+                    break
+                end
+            end
+        end
+        
+        task.wait(5)
+    end
+    
+    if not IsInPlaza then
+        return error([[
+========================================
+  NOT IN TRADING PLAZA!
+========================================
+This bot only works in the Trading Plaza.
+
+The script attempted to travel but failed.
+Please manually join the Trading Plaza and
+run the script again.
+========================================
+]])
+    end
 end
 
 -- ============================================
@@ -133,16 +187,122 @@ end
 
 -- Booth system
 local Booths, ClaimedBooths, BoothsInteractive
-repeat task.wait() 
-    Booths = getsenv(NLibrary.Client:FindFirstChild("BoothCmds") or PlayerScripts.Game["Trading Plaza"]["Booths Frontend"]).getState
-until Booths
-Booths = getupvalues(Booths)
 
-repeat task.wait() 
-    local Interacts = getsenv(NLibrary.Client:FindFirstChild("BoothCmds") or PlayerScripts.Game["Trading Plaza"]["Booths Frontend"]).updateAllInteracts
-until Interacts
-ClaimedBooths = getupvalues(Interacts)[1]
-BoothsInteractive = getupvalues(Interacts)[3]
+local function SetupBoothSystem()
+    local success, err = pcall(function()
+        DebugPrint("Starting booth setup...")
+        
+        -- Find BoothCmds module
+        local boothModule = NLibrary.Client:FindFirstChild("BoothCmds")
+        DebugPrint("BoothCmds in Client:", boothModule)
+        
+        if not boothModule then
+            local plaza = PlayerScripts.Game:FindFirstChild("Trading Plaza")
+            DebugPrint("Trading Plaza found:", plaza)
+            
+            if plaza then
+                boothModule = plaza:FindFirstChild("Booths Frontend")
+                DebugPrint("Booths Frontend found:", boothModule)
+            end
+        end
+        
+        if not boothModule then
+            error("Could not find booth module")
+        end
+        
+        -- Get booth environment
+        DebugPrint("Getting booth environment...")
+        local boothEnv = getsenv(boothModule)
+        if not boothEnv then
+            error("Could not get booth environment")
+        end
+        
+        DebugPrint("Booth environment obtained")
+        
+        -- Get getState function
+        local getState = boothEnv.getState
+        DebugPrint("getState function:", getState, type(getState))
+        
+        if not getState or type(getState) ~= "function" then
+            error("Could not find getState function")
+        end
+        
+        -- Get booths data
+        DebugPrint("Getting booth upvalues...")
+        local upvalues = getupvalues(getState)
+        DebugPrint("Upvalues count:", upvalues and #upvalues or 0)
+        
+        if not upvalues or #upvalues == 0 then
+            error("Could not get booth upvalues")
+        end
+        Booths = upvalues
+        
+        -- Get updateAllInteracts function
+        local updateInteracts = boothEnv.updateAllInteracts
+        DebugPrint("updateAllInteracts function:", updateInteracts, type(updateInteracts))
+        
+        if not updateInteracts or type(updateInteracts) ~= "function" then
+            error("Could not find updateAllInteracts function")
+        end
+        
+        -- Get claimed booths and interactive booths
+        DebugPrint("Getting interact upvalues...")
+        local interactUpvalues = getupvalues(updateInteracts)
+        DebugPrint("Interact upvalues count:", interactUpvalues and #interactUpvalues or 0)
+        
+        if not interactUpvalues or #interactUpvalues < 3 then
+            error("Could not get interact upvalues")
+        end
+        
+        ClaimedBooths = interactUpvalues[1]
+        BoothsInteractive = interactUpvalues[3]
+        
+        DebugPrint("ClaimedBooths:", ClaimedBooths and "Found" or "nil")
+        DebugPrint("BoothsInteractive:", BoothsInteractive and "Found" or "nil")
+        
+        if not ClaimedBooths or not BoothsInteractive then
+            error("Booth tables not found in upvalues")
+        end
+        
+        print("[Booth] System initialized successfully")
+        return true
+    end)
+    
+    if not success then
+        warn("[Booth] Setup failed: " .. tostring(err))
+        return false
+    end
+    
+    return true
+end
+
+-- Try to setup booth system with retries
+local boothSetupAttempts = 0
+local maxBoothAttempts = 10
+
+repeat
+    task.wait(1)
+    boothSetupAttempts = boothSetupAttempts + 1
+    print("[Booth] Setup attempt " .. boothSetupAttempts .. "/" .. maxBoothAttempts)
+until SetupBoothSystem() or boothSetupAttempts >= maxBoothAttempts
+
+if not Booths or not ClaimedBooths or not BoothsInteractive then
+    return error([[
+========================================
+  BOOTH SYSTEM INITIALIZATION FAILED!
+========================================
+Could not connect to the booth system.
+
+Possible causes:
+- Not in Trading Plaza
+- Game not fully loaded
+- Executor incompatibility
+
+Please ensure you are in the Trading Plaza
+and try again.
+========================================
+]])
+end
 
 -- ============================================
 -- UTILITY FUNCTIONS
