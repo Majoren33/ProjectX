@@ -748,7 +748,7 @@ local function SendWebhook(title, description, color, thumbnail)
     if not Settings[mode].Webhook.Active or Settings[mode].Webhook.URL == "" then return end
     
     -- Custom webhook image (you can change this URL)
-    local customAvatarUrl = Settings[mode].Webhook.AvatarURL or "https://i.gyazo.com/dbefd0df338c7ff9c08fc85ecea0df94.png"
+    local customAvatarUrl = WEBHOOK_IMAGE_URL
     local customUsername = Settings[mode].Webhook.Username or "Pet Sim Trading Bot"
     
     local embed = {
@@ -758,7 +758,7 @@ local function SendWebhook(title, description, color, thumbnail)
             title = title,
             description = description,
             color = color or 3447003,
-            thumbnail = thumbnail and {url = thumbnail} or nil,
+            thumbnail = nil,
             timestamp = DateTime.now():ToIsoDate(),
             footer = {
                 text = LocalPlayer.Name .. " | " .. CurrentGame .. " | Trading Bot"
@@ -1331,21 +1331,17 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local pricePerItem = amount > 0 and AddSuffix(diamondsReceived / amount) or "0"
                         local desc = string.format(
-                            "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s` (`%s` per item)\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
+                            "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s`\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
                             itemName,
                             amount,
                             AddSuffix(diamondsReceived),
-                            pricePerItem,
                             itemsInBooth,
                             inventoryCount,
                             AddSuffix(GetDiamonds())
                         )
                         
-                        local thumbnailUrl = WEBHOOK_IMAGE_URL
-                        
-                        SendWebhook("✅ Item Sold!", desc, 5763719, thumbnailUrl)
+                        SendWebhook("✅ Item Sold!", desc, 5763719, nil)
                     end
                     
                     SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
