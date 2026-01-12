@@ -746,9 +746,13 @@ local function SendWebhook(title, description, color, thumbnail)
     if not Settings[mode] or not Settings[mode].Webhook then return end
     if not Settings[mode].Webhook.Active or Settings[mode].Webhook.URL == "" then return end
     
+    -- Custom webhook image (you can change this URL)
+    local customAvatarUrl = Settings[mode].Webhook.AvatarURL or "https://i.gyazo.com/dbefd0df338c7ff9c08fc85ecea0df94.png"
+    local customUsername = Settings[mode].Webhook.Username or "Pet Sim Trading Bot"
+    
     local embed = {
-        username = "Trading Bot | " .. CurrentGame,
-        avatar_url = "https://i.gyazo.com/dbefd0df338c7ff9c08fc85ecea0df94.png",
+        username = customUsername,
+        avatar_url = customAvatarUrl,
         embeds = {{
             title = title,
             description = description,
@@ -756,7 +760,7 @@ local function SendWebhook(title, description, color, thumbnail)
             thumbnail = thumbnail and {url = thumbnail} or nil,
             timestamp = DateTime.now():ToIsoDate(),
             footer = {
-                text = LocalPlayer.Name .. " | Trading Bot v2.0"
+                text = LocalPlayer.Name .. " | " .. CurrentGame .. " | Trading Bot"
             }
         }}
     }
@@ -1090,15 +1094,27 @@ local function ListItemToBooth(uid, itemData, price, amount)
     local maxPerListing = CurrentGame == "PS99" and 50000 or 5000
     local maxPrice = RemoveSuffix("100b")
     
-    -- Validate price
-    if price <= 0 then
-        warn("[Listing] Invalid price: " .. tostring(price))
+    -- Validate price (fix malformed number error)
+    if type(price) ~= "number" then
+        price = tonumber(price)
+    end
+    
+    if not price or price <= 0 or price ~= price then -- NaN check
+        warn("[Listing] Invalid price for " .. itemData.Display .. ": " .. tostring(price))
         return false
     end
+    
+    -- Floor the price to remove decimals
+    price = math.floor(price)
     
     -- Adjust amount if price too high
     if price * amount > maxPrice then
         amount = math.floor(maxPrice / price)
+    end
+    
+    if amount <= 0 then
+        warn("[Listing] Amount too low after price adjustment")
+        return false
     end
     
     local totalListed = 0
@@ -1106,7 +1122,7 @@ local function ListItemToBooth(uid, itemData, price, amount)
     while amount > 0 do
         local listAmount = math.min(amount, maxPerListing)
         
-        local success = Library.Network.Invoke("Booths_CreateListing", uid, math.floor(price), listAmount)
+        local success = Library.Network.Invoke("Booths_CreateListing", uid, price, listAmount)
         
         if success then
             print("[Listing] Listed: " .. itemData.Display .. " x" .. listAmount .. " @ " .. AddSuffix(price))
@@ -1127,6 +1143,117 @@ end
 -- SELLER MODE
 -- ============================================
 
+local SoldItemTracker = {}
+
+local function SetupSoldItemListener()
+    -- Listen for booth sales
+    local connection = Library.Network.Fired("Booths: Add History"):Connect(function(Info)
+        if not Info or not Info.Given then return end
+        
+        pcall(function()
+            -- Calculate amount received
+            local diamondsReceived = 0
+            if Info.Received and Info.Received.Currency then
+                for uid, currencyData in pairs(Info.Received.Currency) do
+                    if currencyData.id == "Diamonds" then
+                        diamondsReceived = currencyData._am or 0
+                        break
+                    end
+                end
+            end
+            
+            -- Process sold items
+            for class, classTable in pairs(Info.Given) do
+                for uid, itemData in pairs(classTable) do
+                    local itemName = itemData.id
+                    local amount = itemData._am or 1
+                    
+                    -- Avoid duplicate notifications
+                    local trackKey = uid .. "_" .. os.time()
+                    if SoldItemTracker[trackKey] then
+                        continue
+                    end
+                    SoldItemTracker[trackKey] = true
+                    
+                    -- Clean old tracker entries (older than 5 minutes)
+                    for key, _ in pairs(SoldItemTracker) do
+                        local timestamp = tonumber(key:split("_")[2])
+                        if timestamp and (os.time() - timestamp) > 300 then
+                            SoldItemTracker[key] = nil
+                        end
+                    end
+                    
+                    print("[Sold] " .. itemName .. " x" .. amount .. " for " .. AddSuffix(diamondsReceived))
+                    
+                    -- Get item icon
+                    local icon = nil
+                    pcall(function()
+                        local itemTypes = require(NLibrary.Items.Types).Types
+                        for className in pairs(itemTypes) do
+                            local success, directory = pcall(function()
+                                if className == "Misc" or className == "Card" then
+                                    return require(NLibrary.Directory[className .. "Items"])
+                                elseif className == "Lootbox" or className == "Box" then
+                                    return require(NLibrary.Directory[className .. "es"])
+                                else
+                                    return require(NLibrary.Directory[className .. "s"])
+                                end
+                            end)
+                            
+                            if success and directory and directory[itemName] then
+                                icon = directory[itemName].Icon or directory[itemName].thumbnail
+                                if type(icon) == "function" then
+                                    icon = icon(1)
+                                end
+                                break
+                            end
+                        end
+                    end)
+                    
+                    -- Get booth status
+                    local boothCount, itemsInBooth = FindItemsInBooth(itemName, class)
+                    local inventoryCount = 0
+                    pcall(function()
+                        local inv = GetInventoryByClass(class)
+                        if inv and inv._byUID then
+                            for _, item in pairs(inv._byUID) do
+                                if item.GetId and item:GetId() == itemName then
+                                    inventoryCount = inventoryCount + (item._data._am or 1)
+                                end
+                            end
+                        end
+                    end)
+                    
+                    -- Send webhook
+                    if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
+                        local pricePerItem = amount > 0 and AddSuffix(diamondsReceived / amount) or "0"
+                        local desc = string.format(
+                            "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s` (`%s` per item)\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
+                            itemName,
+                            amount,
+                            AddSuffix(diamondsReceived),
+                            pricePerItem,
+                            itemsInBooth,
+                            inventoryCount,
+                            AddSuffix(GetDiamonds())
+                        )
+                        
+                        local thumbnailUrl = icon and ("https://biggamesapi.io/image/" .. Library.Functions.ParseAssetId(icon)) or nil
+                        
+                        SendWebhook("✅ Item Sold!", desc, 5763719, thumbnailUrl)
+                    end
+                    
+                    SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
+                    SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + diamondsReceived
+                    SaveToFile()
+                end
+            end
+        end)
+    end)
+    
+    return connection
+end
+
 local function RunSellerMode()
     print("=================================")
     print("[SELLER] Starting seller mode...")
@@ -1137,6 +1264,9 @@ local function RunSellerMode()
         warn("[Seller] No items configured")
         return
     end
+    
+    -- Set up sold item listener
+    SetupSoldItemListener()
     
     -- Claim booth
     if not ClaimBooth() then
@@ -1161,12 +1291,23 @@ local function RunSellerMode()
         return a.Priority and not b.Priority
     end)
     
+    -- Track items that have no inventory (to prevent spam)
+    local noInventoryItems = {}
+    
     -- Process each item
     local listedCount = 0
     for _, item in ipairs(itemList) do
+        -- Skip if we already know there's no inventory
+        if noInventoryItems[item.Name] then
+            continue
+        end
+        
         local findInfo = GenerateFindInfo(item.Name, item.Config)
         if not findInfo.Class and not findInfo.ID:find("All ") then
-            warn("[Seller] Could not find item: " .. item.Name)
+            if not noInventoryItems[item.Name] then
+                warn("[Seller] Could not find item type: " .. item.Name)
+                noInventoryItems[item.Name] = true
+            end
             continue
         end
         
@@ -1181,16 +1322,22 @@ local function RunSellerMode()
         
         -- Check if already listed enough
         if item.Config.Amount and itemsInBooth >= item.Config.Amount then
-            print("[Seller] Already listed enough: " .. item.Name)
+            DebugPrint("Already listed enough: " .. item.Name)
             continue
         end
         
         -- Find items to list
         local uid, itemData = FindItem(findInfo, false)
         if not uid then
-            warn("[Seller] No items found for: " .. item.Name)
+            if not noInventoryItems[item.Name] then
+                DebugPrint("No items found in inventory for: " .. item.Name)
+                noInventoryItems[item.Name] = true
+            end
             continue
         end
+        
+        -- Clear from no-inventory tracker since we found it
+        noInventoryItems[item.Name] = nil
         
         -- Calculate price
         local itemObj = nil
