@@ -759,7 +759,7 @@ local function SendWebhook(title, description, color, thumbnail)
             title = title,
             description = description,
             color = color or 3447003,
-            thumbnail = nil,
+            thumbnail = thumbnail and {url = thumbnail} or nil,
             timestamp = DateTime.now():ToIsoDate(),
             footer = {
                 text = LocalPlayer.Name .. " | " .. CurrentGame .. " | Trading Bot"
@@ -1357,16 +1357,26 @@ local function SetupSoldItemListener()
                         local totalDiamondsNow = GetDiamonds()
                         
                         local desc = string.format(
-                            "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s`\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
+                            "**Item Statistics:**\n- 🎉 Sold: %s (x%d)\n- � Gained: %s\n\n**Other Statistics:**\n- � In Booth: %d\n- � Current Diamonds: %s",
                             itemName,
                             amount,
                             AddSuffix(earnedTotal),
                             itemsInBooth,
-                            inventoryCount,
                             AddSuffix(totalDiamondsNow)
                         )
                         
-                        SendWebhook("✅ Item Sold!", desc, 5763719, nil)
+                        local thumbnailUrl = nil
+                        if icon then
+                            local okParse, assetId = pcall(function()
+                                return Library.Functions.ParseAssetId(icon)
+                            end)
+                            if okParse and assetId then
+                                thumbnailUrl = "https://biggamesapi.io/image/" .. assetId
+                            end
+                        end
+                        
+                        local titleText = LocalPlayer.Name .. " has sold an item!"
+                        SendWebhook(titleText, desc, 5763719, thumbnailUrl)
                     end
                     
                     SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
