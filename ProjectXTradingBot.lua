@@ -1007,6 +1007,60 @@ local function GenerateFindInfo(name, config)
         Shiny = false
     }
     
+    if type(config) == "table" then
+        if config.Class and config.Item then
+            local className = tostring(config.Class)
+            local target = tostring(config.Item)
+            local success, directory = pcall(function()
+                if className == "Misc" or className == "Card" then
+                    return require(NLibrary.Directory[className .. "Items"])
+                elseif className == "Lootbox" or className == "Box" then
+                    return require(NLibrary.Directory[className .. "es"])
+                else
+                    return require(NLibrary.Directory[className .. "s"])
+                end
+            end)
+            if success and directory then
+                for itemId, itemInfo in pairs(directory) do
+                    local displayName = itemInfo.DisplayName
+                    if type(displayName) == "function" then
+                        displayName = displayName(findInfo.Tier or 1)
+                    end
+                    if itemId == target or (displayName and tostring(displayName):lower() == target:lower()) then
+                        findInfo.Class = className
+                        findInfo.ID = itemId
+                        findInfo.Display = displayName or itemId
+                        return findInfo
+                    end
+                end
+            end
+        elseif config.ID then
+            local targetId = tostring(config.ID)
+            local itemTypes = require(NLibrary.Items.Types).Types
+            for className in pairs(itemTypes) do
+                local success, directory = pcall(function()
+                    if className == "Misc" or className == "Card" then
+                        return require(NLibrary.Directory[className .. "Items"])
+                    elseif className == "Lootbox" or className == "Box" then
+                        return require(NLibrary.Directory[className .. "es"])
+                    else
+                        return require(NLibrary.Directory[className .. "s"])
+                    end
+                end)
+                if success and directory and directory[targetId] then
+                    findInfo.Class = className
+                    findInfo.ID = targetId
+                    local displayName = directory[targetId].DisplayName
+                    if type(displayName) == "function" then
+                        displayName = displayName(findInfo.Tier or 1)
+                    end
+                    findInfo.Display = displayName or targetId
+                    return findInfo
+                end
+            end
+        end
+    end
+    
     -- Handle special search terms (don't parse these)
     if name:find("All Huges") or name:find("All Titanics") or name:find("All Exclusives") or 
        name:find("All Rarity") or name:find("All Class") or name:find("All Items") then
