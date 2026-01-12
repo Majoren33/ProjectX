@@ -1283,10 +1283,16 @@ local function SetupSoldItemListener()
                 end
             end
             
-            -- Only process actual sales (ignore purchases that don't credit diamonds)
-            if diamondsReceived <= 0 then
-                return
+            local isSale = false
+            if Info.Received and Info.Received.Currency then
+                for _, currencyData in pairs(Info.Received.Currency) do
+                    if currencyData.id == "Diamonds" and (not (Info.Given and Info.Given.Currency) or next(Info.Given.Currency) == nil) then
+                        isSale = true
+                        break
+                    end
+                end
             end
+            if not isSale then return end
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
