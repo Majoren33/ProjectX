@@ -60,6 +60,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local StartTime = os.time()
+local LastDiamonds = 0
 
 -- Wait for player to load
 repeat task.wait() 
@@ -1256,6 +1257,7 @@ local function SetupSoldItemListener()
         if not Info or not Info.Given then return end
         
         pcall(function()
+            local prevDiamonds = GetDiamonds()
             -- Calculate amount received
             local diamondsReceived = 0
             if Info.Received and Info.Received.Currency then
@@ -1331,11 +1333,17 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
+                        local currentDiamonds = GetDiamonds()
+                        local earnedTotal = math.max(0, currentDiamonds - prevDiamonds)
+                        if earnedTotal <= 0 then
+                            earnedTotal = diamondsReceived
+                        end
+                        
                         local desc = string.format(
                             "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s`\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
                             itemName,
                             amount,
-                            AddSuffix(diamondsReceived),
+                            AddSuffix(earnedTotal),
                             itemsInBooth,
                             inventoryCount,
                             AddSuffix(GetDiamonds())
@@ -1677,6 +1685,7 @@ local function Initialize()
     print("===========================================")
     
     SetupAntiAFK()
+    LastDiamonds = GetDiamonds()
     
     SendWebhook(
         "Bot Started",
