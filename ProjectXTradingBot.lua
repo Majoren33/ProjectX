@@ -17,6 +17,7 @@ local Settings = getgenv().Settings
 
 -- Debug mode (set to true for detailed logs)
 local DEBUG_MODE = getgenv().DEBUG_MODE or false
+local WEBHOOK_IMAGE_URL = "https://media.discordapp.net/attachments/1358102605594886288/1358103169447756087/stsmall507x507-pad600x600f8f8f8.jpg?format=webp"
 
 local function DebugPrint(...)
     if DEBUG_MODE then
@@ -1342,7 +1343,7 @@ local function SetupSoldItemListener()
                             AddSuffix(GetDiamonds())
                         )
                         
-                        local thumbnailUrl = icon and ("https://biggamesapi.io/image/" .. Library.Functions.ParseAssetId(icon)) or nil
+                        local thumbnailUrl = WEBHOOK_IMAGE_URL
                         
                         SendWebhook("✅ Item Sold!", desc, 5763719, thumbnailUrl)
                     end
@@ -1521,16 +1522,6 @@ local function RunSellerMode()
         local success = ListItemToBooth(uid, itemData, price, listAmount)
         if success then
             listedCount = listedCount + 1
-            
-            -- Send webhook
-            local desc = string.format(
-                "**Item:** %s\n**Amount:** %d\n**Price:** %s\n**RAP:** %s",
-                itemData.Display,
-                listAmount,
-                AddSuffix(price),
-                rap and AddSuffix(rap) or "N/A"
-            )
-            SendWebhook("Item Listed", desc, 3066993)
         end
         
         task.wait(1)
