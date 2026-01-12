@@ -1112,32 +1112,47 @@ local function GenerateFindInfo(name, config)
             end
         end)
         
-        if success and directory then
-            for itemId, itemInfo in pairs(directory) do
-                local displayName = itemInfo.DisplayName
-                if type(displayName) == "function" then
-                    displayName = displayName(findInfo.Tier or 1)
-                end
-                
-                -- Try exact match first
-                if displayName == workingName then
-                    findInfo.Class = className
-                    findInfo.ID = itemId
-                    DebugPrint("Found exact match:", itemId, "in class:", className)
-                    return findInfo
-                end
-                
-                -- Try case-insensitive match
-                if displayName and displayName:lower() == workingName:lower() then
-                    findInfo.Class = className
-                    findInfo.ID = itemId
-                    findInfo.Display = displayName  -- Use correct casing
-                    DebugPrint("Found case-insensitive match:", itemId, "in class:", className)
-                    return findInfo
+                if success and directory then
+                    for itemId, itemInfo in pairs(directory) do
+                        local displayName = itemInfo.DisplayName
+                        if type(displayName) == "function" then
+                            displayName = displayName(findInfo.Tier or 1)
+                        end
+                        
+                        -- Try exact match first
+                        if displayName == workingName then
+                            findInfo.Class = className
+                            findInfo.ID = itemId
+                            DebugPrint("Found exact match:", itemId, "in class:", className)
+                            return findInfo
+                        end
+                        
+                        -- Try case-insensitive match
+                        if displayName and displayName:lower() == workingName:lower() then
+                            findInfo.Class = className
+                            findInfo.ID = itemId
+                            findInfo.Display = displayName  -- Use correct casing
+                            DebugPrint("Found case-insensitive match:", itemId, "in class:", className)
+                            return findInfo
+                        end
+                        
+                        -- Fuzzy match: ignore spaces/punctuation and check substring
+                        local function norm(s)
+                            return tostring(s):lower():gsub("%W", "")
+                        end
+                        local targetNorm = norm(workingName)
+                        local displayNorm = norm(displayName or "")
+                        local idNorm = norm(itemId or "")
+                        if targetNorm ~= "" and (displayNorm:find(targetNorm, 1, true) or idNorm:find(targetNorm, 1, true)) then
+                            findInfo.Class = className
+                            findInfo.ID = itemId
+                            findInfo.Display = displayName or itemId
+                            DebugPrint("Found fuzzy match:", itemId, "in class:", className)
+                            return findInfo
+                        end
+                    end
                 end
             end
-        end
-    end
     
     -- If not found in directory, log for debugging
     DebugPrint("Item not found in directory:", workingName)
