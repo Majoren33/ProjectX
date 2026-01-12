@@ -1257,7 +1257,6 @@ local function SetupSoldItemListener()
         if not Info or not Info.Given then return end
         
         pcall(function()
-            local prevDiamonds = GetDiamonds()
             -- Calculate amount received
             local diamondsReceived = 0
             if Info.Received and Info.Received.Currency then
@@ -1267,6 +1266,11 @@ local function SetupSoldItemListener()
                         break
                     end
                 end
+            end
+            
+            -- Only process actual sales (ignore purchases that don't credit diamonds)
+            if diamondsReceived <= 0 then
+                return
             end
             
             -- Process sold items
@@ -1333,11 +1337,9 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local currentDiamonds = GetDiamonds()
-                        local earnedTotal = math.max(0, currentDiamonds - prevDiamonds)
-                        if earnedTotal <= 0 then
-                            earnedTotal = diamondsReceived
-                        end
+                        local earnedTotal = diamondsReceived
+                        task.wait(0.1)
+                        local totalDiamondsNow = GetDiamonds()
                         
                         local desc = string.format(
                             "**💎 Sold:** `%s x%d`\n**💰 Earned:** `%s`\n**📦 In Booth:** `%d`\n**🎒 In Inventory:** `%d`\n**💵 Total Diamonds:** `%s`",
@@ -1346,7 +1348,7 @@ local function SetupSoldItemListener()
                             AddSuffix(earnedTotal),
                             itemsInBooth,
                             inventoryCount,
-                            AddSuffix(GetDiamonds())
+                            AddSuffix(totalDiamondsNow)
                         )
                         
                         SendWebhook("✅ Item Sold!", desc, 5763719, nil)
