@@ -959,61 +959,31 @@ end
 -- ============================================
 
 local function CalculatePrice(priceConfig, itemRAP)
-    local finalPrice = 0
-    
     if type(priceConfig) == "number" then
-        finalPrice = priceConfig
-    elseif type(priceConfig) == "string" then
-        local str = tostring(priceConfig)
-        
-        -- Percentage below RAP (e.g., "10%")
-        if str:match("^%d+%%$") then
-            local percent = tonumber(str:match("%d+"))
-            if not percent then return nil end
-            if not itemRAP or itemRAP == 0 then return nil end
-            finalPrice = itemRAP * (1 - percent / 100)
-        
-        -- Percentage above RAP (e.g., "+10%")
-        elseif str:match("^%+%d+%%$") then
-            local percent = tonumber(str:match("%d+"))
-            if not percent then return nil end
-            if not itemRAP or itemRAP == 0 then return nil end
-            finalPrice = itemRAP * (1 + percent / 100)
-        
-        -- Negative offset (e.g., "-1000")
-        elseif str:match("^%-") then
-            local offset = tonumber(str)
-            if not offset then return nil end
-            if not itemRAP or itemRAP == 0 then return nil end
-            finalPrice = itemRAP + offset
-        
-        -- Fixed amount (e.g., "100k")
-        else
-            finalPrice = RemoveSuffix(str)
-        end
-    else
-        return nil
+        return priceConfig
     end
     
-    -- Validate the final price
-    if type(finalPrice) ~= "number" then
-        return nil
+    local str = tostring(priceConfig)
+    
+    -- Percentage below RAP (e.g., "10%")
+    if str:match("^%d+%%$") then
+        local percent = tonumber(str:match("%d+"))
+        return itemRAP * (1 - percent / 100)
     end
     
-    -- Check for NaN, infinity, or negative
-    if finalPrice ~= finalPrice or finalPrice == math.huge or finalPrice == -math.huge or finalPrice < 0 then
-        return nil
+    -- Percentage above RAP (e.g., "+10%")
+    if str:match("^%+%d+%%$") then
+        local percent = tonumber(str:match("%d+"))
+        return itemRAP * (1 + percent / 100)
     end
     
-    -- Floor to remove decimals
-    finalPrice = math.floor(finalPrice)
-    
-    -- Final sanity check
-    if finalPrice <= 0 then
-        return nil
+    -- Negative offset (e.g., "-1000")
+    if str:match("^%-") then
+        return itemRAP + tonumber(str)
     end
     
-    return finalPrice
+    -- Fixed amount (e.g., "100k")
+    return RemoveSuffix(str)
 end
 
 local function CreateItemObject(itemData)
@@ -1147,20 +1117,70 @@ local function ListItemToBooth(uid, itemData, price, amount)
         return false
     end
     
+    -- Ensure UID type correctness
+    if type(uid) ~= "string" then
+        uid = tostring(uid)
+    end
+    if not uid or uid == "" then
+        warn("[Listing] Invalid UID for item: " .. tostring(itemData.Display))
+        return false
+    end
+    
+    -- Huge pets must be listed one at a time in PS99
+    if itemData.IsHuge then
+        amount = 1
+        maxPerListing = 1
+    end
+    
     local totalListed = 0
     
     while amount > 0 do
         local listAmount = math.min(amount, maxPerListing)
         
-        local success = Library.Network.Invoke("Booths_CreateListing", uid, price, listAmount)
+        -- Extensive Debug Logging for Malformed Error
+        print(string.format("[Listing Debug] Item: %s | UID: %s (Type: %s) | Price: %s (Type: %s) | Amount: %s (Type: %s)", 
+            tostring(itemData.Display), 
+            tostring(uid), type(uid),
+            tostring(price), type(price),
+            tostring(listAmount), type(listAmount)
+        ))
+
+        -- Defensive invoke with retry on malformed args
+        local ok, result = pcall(function()
+            -- Ensure strictly numbers are passed, and format integers as strings if game requires, but standard is number
+            -- Some PS99 remotes are picky about scientific notation or float artifacts
+            return Library.Network.Invoke("Booths_CreateListing", uid, tonumber(price), tonumber(listAmount))
+        end)
+        
+        local success = ok and result == true
         
         if success then
             print("[Listing] Listed: " .. itemData.Display .. " x" .. listAmount .. " @ " .. AddSuffix(price))
             totalListed = totalListed + listAmount
             amount = amount - listAmount
         else
-            warn("[Listing] Failed to list item")
-            return false
+            warn("[Listing] Failed to list item: " .. tostring(itemData.Display) .. " (Error: " .. tostring(result) .. ")")
+            
+            -- Attempt a single corrective retry for common 'Malformed' cases
+            print("[Listing] Retrying with strictly formatted values...")
+            local retryOk, retryResult = pcall(function()
+                -- Force strictly integer-like numbers
+                local fixedPrice = tonumber(string.format("%.0f", price))
+                local fixedAmount = tonumber(string.format("%.0f", listAmount))
+                
+                print("[Listing Debug Retry] Price: " .. tostring(fixedPrice) .. " | Amount: " .. tostring(fixedAmount))
+                
+                return Library.Network.Invoke("Booths_CreateListing", uid, fixedPrice, fixedAmount)
+            end)
+            
+            if retryOk and retryResult == true then
+                print("[Listing] Retry succeeded for " .. itemData.Display)
+                totalListed = totalListed + listAmount
+                amount = amount - listAmount
+            else
+                warn("[Listing] Retry failed; skipping item. Details: ok=" .. tostring(retryOk) .. ", result=" .. tostring(retryResult))
+                return false
+            end
         end
         
         task.wait(0.5)
@@ -1379,14 +1399,6 @@ local function RunSellerMode()
             rap = GetRAP(itemObj)
         end)
         
-        -- Validate RAP if needed for pricing
-        if rap then
-            -- Make sure RAP is a valid number
-            if type(rap) ~= "number" or rap ~= rap or rap <= 0 then
-                rap = nil
-            end
-        end
-        
         -- If RAP is needed for pricing but not available, try alternative methods
         if not rap and (type(item.Config.Price) == "string" and (item.Config.Price:find("%%") or item.Config.Price:find("%+"))) then
             -- Try to get RAP from the inventory item directly
@@ -1397,10 +1409,6 @@ local function RunSellerMode()
                     if inventoryObj and inventoryObj._byUID and inventoryObj._byUID[invItem.UID] then
                         local actualItem = inventoryObj._byUID[invItem.UID]
                         rap = GetRAP(actualItem)
-                        -- Validate again
-                        if rap and (type(rap) ~= "number" or rap ~= rap or rap <= 0) then
-                            rap = nil
-                        end
                     end
                 end)
             end
@@ -1408,18 +1416,11 @@ local function RunSellerMode()
             -- Still no RAP? Try cosmic values
             if not rap and item.Config.UseCosmicValues then
                 rap = GetCosmicValue(itemData.Display)
-                -- Validate
-                if rap and (type(rap) ~= "number" or rap ~= rap or rap <= 0) then
-                    rap = nil
-                end
             end
             
-            -- Last resort: warn and skip
+            -- Last resort: Use a fixed price instead
             if not rap then
-                if not noInventoryItems[item.Name .. "_norap"] then
-                    warn("[Seller] Cannot list " .. item.Name .. " - no RAP available. Use a fixed price instead of percentage.")
-                    noInventoryItems[item.Name .. "_norap"] = true
-                end
+                warn("[Seller] Cannot list " .. item.Name .. " - no RAP available. Consider using a fixed price instead of percentage.")
                 BlacklistedUIDs[uid] = true
                 continue
             end
@@ -1429,57 +1430,28 @@ local function RunSellerMode()
         if item.Config.DetectManipulation and rap then
             local status = CheckManipulation(itemData.Display, rap)
             if status == "Manipulated" then
-                if not noInventoryItems[item.Name .. "_manip"] then
-                    warn("[Seller] Skipping manipulated item: " .. item.Name)
-                    noInventoryItems[item.Name .. "_manip"] = true
-                end
+                warn("[Seller] Skipping manipulated item: " .. item.Name)
                 BlacklistedUIDs[uid] = true
                 continue
             end
         end
         
         -- Use Cosmic Values if enabled
-        if item.Config.UseCosmicValues and not rap then
+        if item.Config.UseCosmicValues then
             local cosmicValue = GetCosmicValue(itemData.Display)
-            if cosmicValue and type(cosmicValue) == "number" and cosmicValue > 0 then
+            if cosmicValue then
                 rap = cosmicValue
             end
         end
         
-        -- Calculate final price
         local price = CalculatePrice(item.Config.Price, rap or 0)
-        
-        -- Validate price calculation result
-        if not price then
-            if not noInventoryItems[item.Name .. "_price"] then
-                warn("[Seller] Failed to calculate price for " .. item.Name .. ". Config: " .. tostring(item.Config.Price) .. ", RAP: " .. tostring(rap))
-                noInventoryItems[item.Name .. "_price"] = true
-            end
-            continue
-        end
         
         -- Apply min/max constraints
         if item.Config.MinPrice then
-            local minPrice = type(item.Config.MinPrice) == "number" and item.Config.MinPrice or RemoveSuffix(tostring(item.Config.MinPrice))
-            if type(minPrice) == "number" and minPrice > 0 then
-                price = math.max(price, math.floor(minPrice))
-            end
+            price = math.max(price, RemoveSuffix(item.Config.MinPrice))
         end
-        
         if item.Config.MaxPrice then
-            local maxPrice = type(item.Config.MaxPrice) == "number" and item.Config.MaxPrice or RemoveSuffix(tostring(item.Config.MaxPrice))
-            if type(maxPrice) == "number" and maxPrice > 0 then
-                price = math.min(price, math.floor(maxPrice))
-            end
-        end
-        
-        -- Final price validation before listing
-        if type(price) ~= "number" or price ~= price or price <= 0 or price == math.huge then
-            if not noInventoryItems[item.Name .. "_invalid"] then
-                warn("[Seller] Invalid final price for " .. item.Name .. ": " .. tostring(price))
-                noInventoryItems[item.Name .. "_invalid"] = true
-            end
-            continue
+            price = math.min(price, RemoveSuffix(item.Config.MaxPrice))
         end
         
         -- Determine amount to list
@@ -1498,23 +1470,13 @@ local function RunSellerMode()
             
             -- Send webhook
             local desc = string.format(
-                "**💎 Item:** %s\n**📊 Amount:** %d\n**💰 Price:** %s%s",
+                "**Item:** %s\n**Amount:** %d\n**Price:** %s\n**RAP:** %s",
                 itemData.Display,
                 listAmount,
                 AddSuffix(price),
-                rap and ("\n**📈 RAP:** " .. AddSuffix(rap)) or ""
+                rap and AddSuffix(rap) or "N/A"
             )
-            
-            local thumbnailUrl = nil
-            pcall(function()
-                if itemData.Icon then
-                    thumbnailUrl = "https://biggamesapi.io/image/" .. Library.Functions.ParseAssetId(itemData.Icon)
-                end
-            end)
-            
-            SendWebhook("💼 Item Listed", desc, 3066993, thumbnailUrl)
-        else
-            warn("[Seller] Failed to list " .. item.Name)
+            SendWebhook("Item Listed", desc, 3066993)
         end
         
         task.wait(1)
