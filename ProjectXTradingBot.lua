@@ -1117,20 +1117,57 @@ local function ListItemToBooth(uid, itemData, price, amount)
         return false
     end
     
+    -- Ensure UID type correctness
+    if type(uid) ~= "string" then
+        uid = tostring(uid)
+    end
+    if not uid or uid == "" then
+        warn("[Listing] Invalid UID for item: " .. tostring(itemData.Display))
+        return false
+    end
+    
+    -- Huge pets must be listed one at a time in PS99
+    if itemData.IsHuge then
+        amount = 1
+        maxPerListing = 1
+    end
+    
     local totalListed = 0
     
     while amount > 0 do
         local listAmount = math.min(amount, maxPerListing)
         
-        local success = Library.Network.Invoke("Booths_CreateListing", uid, price, listAmount)
+        -- Defensive invoke with retry on malformed args
+        local ok, result = pcall(function()
+            return Library.Network.Invoke("Booths_CreateListing", uid, tonumber(price), tonumber(listAmount))
+        end)
+        
+        local success = ok and result == true
         
         if success then
             print("[Listing] Listed: " .. itemData.Display .. " x" .. listAmount .. " @ " .. AddSuffix(price))
             totalListed = totalListed + listAmount
             amount = amount - listAmount
         else
-            warn("[Listing] Failed to list item")
-            return false
+            warn("[Listing] Failed to list item: " .. tostring(itemData.Display) .. " (uid=" .. tostring(uid) .. ", price=" .. tostring(price) .. ", amount=" .. tostring(listAmount) .. ")")
+            
+            -- Attempt a single corrective retry for common 'Malformed' cases
+            local retryOk, retryResult = pcall(function()
+                -- Force numeric types and sanitized uid
+                local fixedUID = tostring(uid)
+                local fixedPrice = math.floor(tonumber(price) or 0)
+                local fixedAmount = math.max(1, tonumber(listAmount) or 1)
+                return Library.Network.Invoke("Booths_CreateListing", fixedUID, fixedPrice, fixedAmount)
+            end)
+            
+            if retryOk and retryResult == true then
+                print("[Listing] Retry succeeded for " .. itemData.Display)
+                totalListed = totalListed + listAmount
+                amount = amount - listAmount
+            else
+                warn("[Listing] Retry failed; skipping item. Details: ok=" .. tostring(retryOk) .. ", result=" .. tostring(retryResult))
+                return false
+            end
         end
         
         task.wait(0.5)
