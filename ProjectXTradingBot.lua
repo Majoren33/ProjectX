@@ -1288,7 +1288,9 @@ local function SetupSoldItemListener()
                     end
                 end
             end
-            if receivedDiamonds <= 0 or givenDiamonds > 0 then return end
+            local netDiamonds = receivedDiamonds - givenDiamonds
+            DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
+            if netDiamonds <= 0 then return end
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1314,7 +1316,7 @@ local function SetupSoldItemListener()
                         end
                     end
                     
-                    print("[Sold] " .. itemName .. " x" .. amount .. " for " .. AddSuffix(receivedDiamonds))
+                    DebugPrint("[Sold] item=", itemName, "amount=", amount, "earned=", netDiamonds)
                     
                     -- Get item icon
                     local icon = nil
@@ -1357,7 +1359,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = receivedDiamonds
+                        local earnedTotal = netDiamonds
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
@@ -1385,7 +1387,7 @@ local function SetupSoldItemListener()
                     end
                     
                     SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
-                    SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + diamondsReceived
+                        SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + earnedTotal
                     SaveToFile()
                 end
             end
