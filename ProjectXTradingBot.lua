@@ -1272,31 +1272,30 @@ local function SetupSoldItemListener()
         if not Info or not Info.Given then return end
         
         pcall(function()
-            -- Calculate amount received
-            local diamondsReceived = 0
-            if Info.Received and Info.Received.Currency then
-                for uid, currencyData in pairs(Info.Received.Currency) do
-                    if currencyData.id == "Diamonds" then
-                        diamondsReceived = currencyData._am or 0
-                        break
-                    end
-                end
-            end
-            
-            local isSale = false
+            local receivedDiamonds = 0
             if Info.Received and Info.Received.Currency then
                 for _, currencyData in pairs(Info.Received.Currency) do
-                    if currencyData.id == "Diamonds" and (not (Info.Given and Info.Given.Currency) or next(Info.Given.Currency) == nil) then
-                        isSale = true
-                        break
+                    if currencyData.id == "Diamonds" then
+                        receivedDiamonds = (currencyData._am or 0)
                     end
                 end
             end
-            if not isSale then return end
+            local givenDiamonds = 0
+            if Info.Given and Info.Given.Currency then
+                for _, currencyData in pairs(Info.Given.Currency) do
+                    if currencyData.id == "Diamonds" then
+                        givenDiamonds = (currencyData._am or 0)
+                    end
+                end
+            end
+            if receivedDiamonds <= 0 or givenDiamonds > 0 then return end
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
                 for uid, itemData in pairs(classTable) do
+                    if class == "Currency" then
+                        continue
+                    end
                     local itemName = itemData.id
                     local amount = itemData._am or 1
                     
@@ -1315,7 +1314,7 @@ local function SetupSoldItemListener()
                         end
                     end
                     
-                    print("[Sold] " .. itemName .. " x" .. amount .. " for " .. AddSuffix(diamondsReceived))
+                    print("[Sold] " .. itemName .. " x" .. amount .. " for " .. AddSuffix(receivedDiamonds))
                     
                     -- Get item icon
                     local icon = nil
@@ -1358,7 +1357,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = diamondsReceived
+                        local earnedTotal = receivedDiamonds
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
