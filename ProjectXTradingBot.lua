@@ -48,7 +48,7 @@ Settings.Seller["Switch Servers"] = Settings.Seller["Switch Servers"] or {Active
 Settings.Seller["Webhook"] = Settings.Seller["Webhook"] or {Active = false, URL = ""}
 Settings.Seller["Kill Switch"] = Settings.Seller["Kill Switch"] or {}
 Settings.Seller["Diamonds Sendout"] = Settings.Seller["Diamonds Sendout"] or {Active = false}
-Settings.Seller["Earnings Scale"] = Settings.Seller["Earnings Scale"] or 100
+Settings.Seller["Earnings Scale"] = Settings.Seller["Earnings Scale"] or 1
 
 -- ============================================
 -- SERVICES & GAME DETECTION
@@ -658,7 +658,6 @@ end
 
 local OverlayUI = {}
 local DiamondsSnapshot = 0
-local EarnScaleFactor = nil
 
 local function GetUIParent()
     local parent = nil
@@ -1409,7 +1408,7 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
-            local creditedFromListings = 0
+            local creditedEvent = 0
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1420,8 +1419,10 @@ local function SetupSoldItemListener()
                     local itemName = itemData.id
                     local amount = itemData._am or 1
                     
+                    local itemCredit = 0
                     if ListingPrices[uid] then
-                        creditedFromListings = creditedFromListings + (ListingPrices[uid] * amount)
+                        itemCredit = (ListingPrices[uid] * amount)
+                        creditedEvent = creditedEvent + itemCredit
                         ListingPrices[uid] = nil
                     end
                     
@@ -1483,7 +1484,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = creditedFromListings > 0 and creditedFromListings or (netDiamonds * (Settings.Seller["Earnings Scale"] or 100))
+                        local earnedTotal = itemCredit > 0 and itemCredit or netDiamonds
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
@@ -1511,16 +1512,13 @@ local function SetupSoldItemListener()
                     end
                     
                     SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
-                    SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + (creditedFromListings > 0 and creditedFromListings or (netDiamonds * (Settings.Seller["Earnings Scale"] or 100)))
-                    SaveToFile()
                 end
             end
             
-            if creditedFromListings > 0 then
-                RecordEarnings(creditedFromListings)
-            else
-                RecordEarnings(netDiamonds * (Settings.Seller["Earnings Scale"] or 100))
-            end
+            local eventCredit = creditedEvent > 0 and creditedEvent or (netDiamonds * (Settings.Seller["Earnings Scale"] or 1))
+            SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + eventCredit
+            SaveToFile()
+            RecordEarnings(eventCredit)
         end)
     end)
     
