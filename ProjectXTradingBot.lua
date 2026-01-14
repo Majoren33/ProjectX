@@ -656,15 +656,41 @@ end
 
 local OverlayUI = {}
 
+local function GetUIParent()
+    local parent = nil
+    local ok, res = pcall(function()
+        if gethui then return gethui() end
+    end)
+    if ok and res then
+        parent = res
+    end
+    if not parent then
+        local CoreGui = game:GetService("CoreGui")
+        parent = CoreGui
+        if not parent or not parent.Parent then
+            local Players = game:GetService("Players")
+            local lp = Players.LocalPlayer
+            parent = lp:WaitForChild("PlayerGui")
+        end
+    end
+    return parent
+end
+
 local function CreateOverlay()
-    local CoreGui = game:GetService("CoreGui")
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "ProjectXDiamondsOverlay"
     ScreenGui.IgnoreGuiInset = true
     ScreenGui.ResetOnSpawn = false
     ScreenGui.DisplayOrder = 999999
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.Enabled = true
-    ScreenGui.Parent = CoreGui
+    local parent = GetUIParent()
+    ScreenGui.Parent = parent
+    pcall(function()
+        if syn and syn.protect_gui then
+            syn.protect_gui(ScreenGui)
+        end
+    end)
 
     local Frame = Instance.new("Frame")
     Frame.Size = UDim2.fromScale(1, 1)
