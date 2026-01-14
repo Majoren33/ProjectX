@@ -661,13 +661,18 @@ local function GetUIParent()
     local ok, res = pcall(function()
         if gethui then return gethui() end
     end)
-    if ok and res then
+    if ok and res and typeof(res) == "Instance" then
         parent = res
     end
     if not parent then
-        local CoreGui = game:GetService("CoreGui")
-        parent = CoreGui
-        if not parent or not parent.Parent then
+        local CoreGui = nil
+        pcall(function()
+            CoreGui = game:GetService("CoreGui")
+        end)
+        if CoreGui and typeof(CoreGui) == "Instance" then
+            parent = CoreGui
+        end
+        if not parent or typeof(parent) ~= "Instance" or not parent.Parent then
             local Players = game:GetService("Players")
             local lp = Players.LocalPlayer
             parent = lp:WaitForChild("PlayerGui")
