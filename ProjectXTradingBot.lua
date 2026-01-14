@@ -48,6 +48,7 @@ Settings.Seller["Switch Servers"] = Settings.Seller["Switch Servers"] or {Active
 Settings.Seller["Webhook"] = Settings.Seller["Webhook"] or {Active = false, URL = ""}
 Settings.Seller["Kill Switch"] = Settings.Seller["Kill Switch"] or {}
 Settings.Seller["Diamonds Sendout"] = Settings.Seller["Diamonds Sendout"] or {Active = false}
+Settings.Seller["Earnings Scale"] = Settings.Seller["Earnings Scale"] or 100
 
 -- ============================================
 -- SERVICES & GAME DETECTION
@@ -423,6 +424,7 @@ end
 
 local BlacklistedUIDs = {}
 local LastUIDs = {}
+local ListingPrices = {}
 
 local function FindItemsInBooth(itemId, class)
     local itemCount = 0
@@ -1341,6 +1343,7 @@ local function ListItemToBooth(uid, itemData, price, amount)
         
         if success then
             print("[Listing] Listed: " .. itemData.Display .. " x" .. listAmount .. " @ " .. AddSuffix(price))
+            ListingPrices[uid] = price
             totalListed = totalListed + listAmount
             amount = amount - listAmount
         else
@@ -1360,6 +1363,7 @@ local function ListItemToBooth(uid, itemData, price, amount)
             
             if retryOk and retryResult == true then
                 print("[Listing] Retry succeeded for " .. itemData.Display)
+                ListingPrices[uid] = tonumber(string.format("%.0f", price))
                 totalListed = totalListed + listAmount
                 amount = amount - listAmount
             else
@@ -1405,27 +1409,7 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
-            local pre = GetDiamonds()
-            task.wait(0.5)
-            local post = GetDiamonds()
-            local delta = math.max(0, post - pre)
-            if not EarnScaleFactor and delta > 0 and netDiamonds > 0 then
-                local ratio = delta / netDiamonds
-                local candidates = {1, 100, 1000}
-                local best = 1
-                local bestDiff = math.huge
-                for _, c in ipairs(candidates) do
-                    local d = math.abs(ratio - c)
-                    if d < bestDiff then
-                        bestDiff = d
-                        best = c
-                    end
-                end
-                EarnScaleFactor = best
-                DebugPrint("[Earnings] Calibrated scale factor:", EarnScaleFactor, "delta=", delta, "net=", netDiamonds)
-            end
-            local credited = netDiamonds * (EarnScaleFactor or 1)
-            RecordEarnings(credited)
+            local creditedFromListings = 0
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1435,6 +1419,11 @@ local function SetupSoldItemListener()
                     end
                     local itemName = itemData.id
                     local amount = itemData._am or 1
+                    
+                    if ListingPrices[uid] then
+                        creditedFromListings = creditedFromListings + (ListingPrices[uid] * amount)
+                        ListingPrices[uid] = nil
+                    end
                     
                     -- Avoid duplicate notifications
                     local trackKey = uid .. "_" .. os.time()
@@ -1494,7 +1483,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = credited
+                        local earnedTotal = creditedFromListings > 0 and creditedFromListings or (netDiamonds * (Settings.Seller["Earnings Scale"] or 100))
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
@@ -1522,9 +1511,15 @@ local function SetupSoldItemListener()
                     end
                     
                     SaveData.Statistics.ItemsSold = SaveData.Statistics.ItemsSold + amount
-                        SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + earnedTotal
+                    SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + (creditedFromListings > 0 and creditedFromListings or (netDiamonds * (Settings.Seller["Earnings Scale"] or 100)))
                     SaveToFile()
                 end
+            end
+            
+            if creditedFromListings > 0 then
+                RecordEarnings(creditedFromListings)
+            else
+                RecordEarnings(netDiamonds * (Settings.Seller["Earnings Scale"] or 100))
             end
         end)
     end)
