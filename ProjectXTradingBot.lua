@@ -655,6 +655,7 @@ local function GetLastHourEarnings()
 end
 
 local OverlayUI = {}
+local DiamondsSnapshot = 0
 
 local function GetUIParent()
     local parent = nil
@@ -733,6 +734,7 @@ end
 local function UpdateOverlay()
     if not OverlayUI.DiamondsLabel or not OverlayUI.EarningsLabel then return end
     local diamonds = GetDiamonds()
+    DiamondsSnapshot = diamonds
     OverlayUI.DiamondsLabel.Text = "Diamonds: " .. AddSuffix(diamonds)
     local earned = GetLastHourEarnings()
     OverlayUI.EarningsLabel.Text = "Earned (Last Hour): " .. AddSuffix(earned)
@@ -1402,7 +1404,10 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
-            RecordEarnings(netDiamonds)
+            local currentDiamonds = GetDiamonds()
+            local delta = math.max(0, currentDiamonds - DiamondsSnapshot)
+            local credited = math.max(netDiamonds, delta)
+            RecordEarnings(credited)
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1471,7 +1476,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = netDiamonds
+                        local earnedTotal = credited
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
