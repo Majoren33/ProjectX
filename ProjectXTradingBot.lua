@@ -167,6 +167,7 @@ end
 
 -- Booth system
 local Booths, ClaimedBooths, BoothsInteractive
+local DiamondsScale = (CurrentGame == "PS99") and 100 or 1
 
 local function SetupBoothSystem()
     local success, err = pcall(function()
@@ -1408,7 +1409,7 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
-            local creditedEvent = 0
+            local creditedSum = 0
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1422,7 +1423,7 @@ local function SetupSoldItemListener()
                     local itemCredit = 0
                     if ListingPrices[uid] then
                         itemCredit = (ListingPrices[uid] * amount)
-                        creditedEvent = creditedEvent + itemCredit
+                        creditedSum = creditedSum + itemCredit
                         ListingPrices[uid] = nil
                     end
                     
@@ -1484,7 +1485,7 @@ local function SetupSoldItemListener()
                     
                     -- Send webhook
                     if Settings.Seller and Settings.Seller.Webhook and Settings.Seller.Webhook.Active then
-                        local earnedTotal = itemCredit > 0 and itemCredit or netDiamonds
+                        local earnedTotal = itemCredit > 0 and itemCredit or 0
                         task.wait(0.1)
                         local totalDiamondsNow = GetDiamonds()
                         
@@ -1515,7 +1516,18 @@ local function SetupSoldItemListener()
                 end
             end
             
-            local eventCredit = creditedEvent > 0 and creditedEvent or (netDiamonds * (Settings.Seller["Earnings Scale"] or 1))
+            local preDiamonds = GetDiamonds()
+            local observedDelta = 0
+            for i = 1, 20 do
+                task.wait(0.1)
+                local now = GetDiamonds()
+                local d = now - preDiamonds
+                if d > 0 then
+                    observedDelta = d
+                    break
+                end
+            end
+            local eventCredit = creditedSum > 0 and creditedSum or (observedDelta > 0 and observedDelta or (netDiamonds * DiamondsScale))
             SaveData.Statistics.DiamondsEarned = SaveData.Statistics.DiamondsEarned + eventCredit
             SaveToFile()
             RecordEarnings(eventCredit)
