@@ -1404,9 +1404,11 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
-            local currentDiamonds = GetDiamonds()
-            local delta = math.max(0, currentDiamonds - DiamondsSnapshot)
-            local credited = math.max(netDiamonds, delta)
+            local pre = GetDiamonds()
+            task.wait(0.3)
+            local post = GetDiamonds()
+            local delta = math.max(0, post - pre)
+            local credited = delta > 0 and delta or netDiamonds
             RecordEarnings(credited)
             
             -- Process sold items
