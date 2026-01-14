@@ -656,7 +656,7 @@ end
 
 local OverlayUI = {}
 local DiamondsSnapshot = 0
-local EarnScaleFactor = 1
+local EarnScaleFactor = nil
 
 local function GetUIParent()
     local parent = nil
@@ -1409,9 +1409,9 @@ local function SetupSoldItemListener()
             task.wait(0.5)
             local post = GetDiamonds()
             local delta = math.max(0, post - pre)
-            if delta > 0 and netDiamonds > 0 then
+            if not EarnScaleFactor and delta > 0 and netDiamonds > 0 then
                 local ratio = delta / netDiamonds
-                local candidates = {1, 10, 100, 1000}
+                local candidates = {1, 100, 1000}
                 local best = 1
                 local bestDiff = math.huge
                 for _, c in ipairs(candidates) do
@@ -1424,7 +1424,7 @@ local function SetupSoldItemListener()
                 EarnScaleFactor = best
                 DebugPrint("[Earnings] Calibrated scale factor:", EarnScaleFactor, "delta=", delta, "net=", netDiamonds)
             end
-            local credited = netDiamonds * EarnScaleFactor
+            local credited = netDiamonds * (EarnScaleFactor or 1)
             RecordEarnings(credited)
             
             -- Process sold items
