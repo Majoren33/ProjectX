@@ -627,6 +627,86 @@ local function GetMailCost()
     end
 end
 
+local EarningsLog = {}
+
+local function RecordEarnings(amount)
+    if type(amount) ~= "number" or amount <= 0 then return end
+    local now = os.time()
+    table.insert(EarningsLog, {t = now, a = amount})
+    for i = #EarningsLog, 1, -1 do
+        if now - EarningsLog[i].t > 3600 then
+            table.remove(EarningsLog, i)
+        end
+    end
+end
+
+local function GetLastHourEarnings()
+    local now = os.time()
+    local total = 0
+    for i = #EarningsLog, 1, -1 do
+        local e = EarningsLog[i]
+        if now - e.t > 3600 then
+            table.remove(EarningsLog, i)
+        else
+            total = total + e.a
+        end
+    end
+    return total
+end
+
+local OverlayUI = {}
+
+local function CreateOverlay()
+    local CoreGui = game:GetService("CoreGui")
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "ProjectXDiamondsOverlay"
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.DisplayOrder = 999999
+    ScreenGui.Enabled = true
+    ScreenGui.Parent = CoreGui
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.fromScale(1, 1)
+    Frame.Position = UDim2.fromScale(0, 0)
+    Frame.BackgroundColor3 = Color3.new(0, 0, 0)
+    Frame.BorderSizePixel = 0
+    Frame.Parent = ScreenGui
+
+    local DiamondsLabel = Instance.new("TextLabel")
+    DiamondsLabel.Size = UDim2.fromScale(1, 0.3)
+    DiamondsLabel.Position = UDim2.fromScale(0, 0.25)
+    DiamondsLabel.BackgroundTransparency = 1
+    DiamondsLabel.TextColor3 = Color3.new(1, 1, 1)
+    DiamondsLabel.Font = Enum.Font.GothamBlack
+    DiamondsLabel.TextScaled = true
+    DiamondsLabel.Text = ""
+    DiamondsLabel.Parent = Frame
+
+    local EarningsLabel = Instance.new("TextLabel")
+    EarningsLabel.Size = UDim2.fromScale(1, 0.2)
+    EarningsLabel.Position = UDim2.fromScale(0, 0.6)
+    EarningsLabel.BackgroundTransparency = 1
+    EarningsLabel.TextColor3 = Color3.new(1, 1, 1)
+    EarningsLabel.Font = Enum.Font.GothamBold
+    EarningsLabel.TextScaled = true
+    EarningsLabel.Text = ""
+    EarningsLabel.Parent = Frame
+
+    OverlayUI.ScreenGui = ScreenGui
+    OverlayUI.Frame = Frame
+    OverlayUI.DiamondsLabel = DiamondsLabel
+    OverlayUI.EarningsLabel = EarningsLabel
+end
+
+local function UpdateOverlay()
+    if not OverlayUI.DiamondsLabel or not OverlayUI.EarningsLabel then return end
+    local diamonds = GetDiamonds()
+    OverlayUI.DiamondsLabel.Text = "Diamonds: " .. AddSuffix(diamonds)
+    local earned = GetLastHourEarnings()
+    OverlayUI.EarningsLabel.Text = "Earned (Last Hour): " .. AddSuffix(earned)
+end
+
 -- ============================================
 -- RAP & VALUE FUNCTIONS
 -- ============================================
@@ -1291,6 +1371,7 @@ local function SetupSoldItemListener()
             local netDiamonds = receivedDiamonds - givenDiamonds
             DebugPrint("[SaleCheck] received=", receivedDiamonds, "given=", givenDiamonds, "net=", netDiamonds)
             if netDiamonds <= 0 then return end
+            RecordEarnings(netDiamonds)
             
             -- Process sold items
             for class, classTable in pairs(Info.Given) do
@@ -1720,6 +1801,13 @@ local function Initialize()
     
     SetupAntiAFK()
     LastDiamonds = GetDiamonds()
+    CreateOverlay()
+    task.spawn(function()
+        while true do
+            UpdateOverlay()
+            task.wait(1)
+        end
+    end)
     
     SendWebhook(
         "Bot Started",
